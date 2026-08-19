@@ -1,0 +1,4 @@
+experiment,mae_mean,mae_sd,rmse_mean,rmse_sd,r2_mean,r2_sd,spearman_mean,spearman_sd
+ResNet18 two-window input,1.451,0.395,1.858,0.434,0.126,0.161,0.363,0.239
+ResNet18 three-channel input,1.386,0.456,1.826,0.394,0.186,0.394,0.387,0.256
+ResNet18-3CH+BoVW proposed model,1.244,0.297,1.712,0.505,0.236,0.295,0.498,0.346

@@ -1,0 +1,80 @@
+\documentclass[a4paper,book,masters,en,listoffigures,listoftables]{NMBU}
+
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsmath,amssymb}
+\usepackage{chngcntr}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, calc}
+
+
+\addbibresource{references.bib}
+
+\counterwithout{equation}{chapter}
+\counterwithin{table}{section}
+\renewcommand{\theequation}{\arabic{equation}}
+
+\title{Automated Prediction of Mucus Plug Burden in Lung CT Scans}
+\author{Taofik Muhriz}
+\thesisyear{2026}
+\credits{30}
+\faculty{Faculty of Science and Technology}
+\studyprogramme{Data Science}
+\supervisor{Fadi Al Machot}
+
+\abstract{%
+Mucus plugs are clinically relevant airway findings that can be assessed from chest CT, but manual assessment requires careful review of volumetric image data. This thesis investigates whether patient-level mucus plug burden can be predicted automatically from lung CT scans using a weakly supervised, slice-based machine learning pipeline. The task is formulated as patient-level regression: the available target is one mucus-burden score per CT examination, while the model operates on selected axial slices without slice-level mucus annotations.\par
+The implemented pipeline combines representative slice selection, CT input representation, CNN-based feature extraction, patient-level aggregation, and transfer-oriented evaluation. Representative slices are selected using central restriction, heuristic informativeness filtering, PCA-based descriptor reduction, and MiniBatchKMeans diversity sampling. The model input is evaluated using a two-window CT baseline and a three-channel representation with a high-pass channel. ResNet18 and DenseNet121 are compared as compact pretrained CNN backbones, and an ORB-based bag-of-visual-words branch is evaluated as a handcrafted feature-fusion component. Internal performance is assessed using five-fold patient-level cross-validation. Additional transfer experiments with MosMed are used to study source--target adaptation and domain shift.\par
+The results suggest that representative slice selection performed better than uniform sampling, and that the ResNet18 three-channel model with ORB-BoVW fusion gave the strongest internal performance among the tested configurations. DenseNet121 did not consistently outperform ResNet18. In the transfer experiments, fine-tuning was more useful than zero-shot transfer. MosMed is not used as external validation for mucus-burden prediction because it has a different COVID-related severity target, it is used only for transfer and domain-shift analysis. The pipeline gives promising exploratory results, but the conclusions are limited by the small internal cohort, weak supervision, and lack of external mucus-specific validation.
+}
+
+\sammendrag{%
+Slimpropper er klinisk relevante funn i luftveiene og kan vurderes fra lunge-CT, men manuell vurdering krever gjennomgang av volumetriske bildedata. Denne masteroppgaven undersøker om slimproppbelastning på pasientnivå kan predikeres automatisk fra lunge-CT ved hjelp av en svakt veiledet, snittbasert maskinlæringspipeline. Oppgaven er formulert som regresjon på pasientnivå, hvert CT-opptak har én tilhørende slimproppscore, mens modellen arbeider med utvalgte aksiale snitt uten snittvise annotasjoner av slimpropper.\par
+Den implementerte pipelinen kombinerer representativt snittutvalg, CT-basert inputrepresentasjon, CNN-basert egenskapsuttrekk, aggregering til pasientnivå og transfer-orientert evaluering. Representative snitt velges ved hjelp av sentral begrensning, heuristisk filtrering av lite informative snitt, PCA-basert reduksjon av snittdeskriptorer og MiniBatchKMeans-basert diversitetsutvalg. Modellinput evalueres med en to-vindus CT-representasjon og en trekanals representasjon med en high-pass-kanal. ResNet18 og DenseNet121 sammenlignes som kompakte forhåndstrente CNN-arkitekturer, og en ORB-basert bag-of-visual-words-gren evalueres som et håndlaget egenskapstillegg til CNN-representasjonen. Intern ytelse vurderes med femfolds kryssvalidering på pasientnivå. I tillegg brukes transfer-eksperimenter med MosMed for å undersøke tilpasning mellom datasett og domeneskift.\par
+Resultatene tyder på at representativt snittutvalg ga bedre resultater enn jevn sampling, og at ResNet18-modellen med trekanals input og ORB-BoVW-fusjon ga den sterkeste interne ytelsen blant de testede konfigurasjonene. DenseNet121 ga ikke en konsekvent forbedring over ResNet18. I transfer-eksperimentene var finjustering mer nyttig enn zero-shot transfer. MosMed brukes ikke som ekstern validering av slimpropprediksjon, fordi datasettet har et annet COVID-relatert alvorlighetsmål, det brukes kun til analyse av transfer og domeneskift. Samlet viser pipelinen lovende utforskende resultater, men konklusjonene begrenses av liten intern kohort, svakt veiledet læring og manglende ekstern validering med slimproppspesifikke mål.
+}
+
+\acknowledgements{%
+I would first and foremost like to thank my supervisor, Fadi Al Machot, for his excellent guidance, helpful feedback, and valuable support throughout the work on this master’s thesis. I could not have done this without his help. His feedback has been very useful throughout the entire process and has contributed to further developing the thesis. I also greatly appreciate that he has taken the time to discuss ideas, answer questions, and give advice when I have been stuck.
+
+I would also like to thank my family for their support, patience, and encouragement throughout my studies. It has meant a lot to have people around me who have supported me both during periods of progress and during periods when the work has been demanding.
+
+In addition, I would like to thank my friends and fellow students for good conversations, motivation, and support along the way. You have made everyday student life at NMBU both easier and more rewarding. I am grateful to everyone who, in different ways, has contributed to making my years at NMBU a valuable and educational period.
+}
+
+\begin{document}
+
+\startthesis
+\pagestyle{plain}
+
+\input{chapters/introduction}
+\input{chapters/related_work}
+\input{chapters/theory_problem_formulation}
+\input{chapters/methodology}
+\input{chapters/experiments_results}
+\input{chapters/discussion}
+\input{chapters/conclusion}
+
+
+\clearpage
+\thispagestyle{plain}
+\begin{center}
+\noindent\normalfont\LARGE\textbf{AI Declaration}
+\end{center}
+\begin{quotation}
+\sloppy
+Generative AI tools, including OpenAI ChatGPT, were used as support tools during the work on this thesis. The tools were used for tasks such as language improvement, restructuring suggestions, LaTeX editing, consistency checks across chapters, and assistance with understanding and organizing repository content. They were also used as coding and debugging support when working with implementation material.
+
+AI-generated suggestions were not used as a substitute for independent academic work. All methodological choices, reported results, interpretations, and final thesis text were reviewed, edited, and approved by the author. Numerical results were taken from the thesis experiments and result material. Literature-based claims were checked against the cited sources, or written cautiously when support was limited.
+
+The author remains fully responsible for the final thesis content, including any errors, interpretations, and conclusions.
+\end{quotation}
+
+
+\references
+
+
+\end{document}

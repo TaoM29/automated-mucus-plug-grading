@@ -1,0 +1,1643 @@
+\chapter{Methodology}
+\label{chap:methodology}
+
+This chapter describes how the conceptual formulation from Chapter~\ref{chap:theory} was implemented. It specifies the data representation, slice-selection procedure, model components, aggregation rules, training setup, and reproducibility details used in this thesis.
+
+
+\section{Overview of the Proposed Pipeline}
+\label{sec:overview_of_the_proposed_pipeline}
+The implemented pipeline operates at patient level. Each patient \(i\) is represented by a volumetric chest CT examination \(X_i\) and a corresponding target \(y_i\). The volume is preprocessed, reduced to representative slices, converted into model inputs, passed through feature-extraction and prediction modules, and finally aggregated into one patient-level estimate.
+
+Figure~\ref{fig:proposed_model_architecture} gives an overview of the proposed ResNet18-3CH+BoVW pipeline. The individual stages shown in the figure are described in detail in the following sections.
+
+\begin{figure}[H]
+\centering
+
+\definecolor{ctBlue}{RGB}{221,235,247}
+\definecolor{ctBlueLine}{RGB}{88,126,166}
+\definecolor{prepTeal}{RGB}{218,241,238}
+\definecolor{prepTealLine}{RGB}{73,139,130}
+\definecolor{sliceOrange}{RGB}{254,232,200}
+\definecolor{sliceOrangeLine}{RGB}{190,121,51}
+\definecolor{reprYellow}{RGB}{255,247,188}
+\definecolor{reprYellowLine}{RGB}{169,145,44}
+\definecolor{cnnGreen}{RGB}{223,240,216}
+\definecolor{cnnGreenLine}{RGB}{85,139,78}
+\definecolor{bovwPurple}{RGB}{232,225,245}
+\definecolor{bovwPurpleLine}{RGB}{117,91,154}
+\definecolor{fusionGray}{RGB}{226,226,226}
+\definecolor{fusionGrayLine}{RGB}{95,95,95}
+\definecolor{predRed}{RGB}{248,218,218}
+\definecolor{predRedLine}{RGB}{166,83,83}
+
+\resizebox{0.92\textwidth}{!}{%
+\begin{tikzpicture}[
+    font=\scriptsize,
+    node distance=5.5mm,
+    >={Latex[length=2mm]},
+    pipeline/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        text width=6.7cm,
+        inner sep=4pt,
+        minimum height=8mm
+    },
+    branch/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        text width=4.45cm,
+        inner sep=4pt,
+        minimum height=8mm
+    },
+    note/.style={
+        draw,
+        rounded corners=2pt,
+        dashed,
+        fill=white,
+        align=left,
+        text width=3.85cm,
+        inner sep=4pt
+    },
+    arrow/.style={->, line width=0.65pt, draw=black!70},
+    notearrow/.style={->, dashed, line width=0.5pt, draw=black!55},
+    cticon/.pic={
+        \draw[fill=white, draw=ctBlueLine, rounded corners=0.6pt, line width=0.35pt]
+            (-0.42,-0.30) rectangle (0.42,0.30);
+        \draw[fill=black!78, draw=black!55, line width=0.35pt]
+            (0,0) circle (0.23);
+        \draw[fill=black!32, draw=black!25, line width=0.25pt]
+            (-0.05,0.02) ellipse (0.12 and 0.08);
+        \draw[fill=black!38, draw=black!25, line width=0.25pt]
+            (0.10,-0.04) ellipse (0.10 and 0.07);
+        \draw[draw=white, line width=0.35pt]
+            (-0.15,0.13) .. controls (-0.02,0.23) and (0.13,0.18) .. (0.17,0.05);
+    }
+]
+
+\node[pipeline, fill=ctBlue, draw=ctBlueLine, minimum height=16mm, text width=7.0cm] (volume) {
+    \hspace*{1.45cm}\parbox{5.2cm}{\centering
+    \textbf{Patient CT examination}\\
+    Stored volume \(X_i\) and patient-level target \(y_i\)}
+};
+
+\node[anchor=center] at ([xshift=-2.75cm]volume.center)
+{\includegraphics[height=9mm]{figures/rawct1.png}};
+
+
+
+\node[pipeline, below=of volume, fill=prepTeal, draw=prepTealLine] (preprocess) {
+    \textbf{Data preprocessing}\\
+    HU clipping/canonicalization; slice-wise resizing to \(256 \times 256\)
+};
+
+\node[pipeline, below=of preprocess, fill=sliceOrange, draw=sliceOrangeLine] (selection) {
+    \textbf{Representative slice selection}\\
+    Central restriction; informativeness filtering; PCA descriptors;\\
+    MiniBatchKMeans diversity sampling; selected set \(\mathcal{S}_i\)
+};
+
+\node[pipeline, below=of selection, fill=reprYellow, draw=reprYellowLine] (representation) {
+    \textbf{Three-channel high-pass representation}\\
+    For each selected slice \(j \in \mathcal{S}_i\):\\
+    lung-window, mediastinal-window, and high-pass channels\\
+    \(r_{i,j}^{(3,\mathrm{HP})}\)
+
+};
+
+\node[note, right=7mm of representation] (hpnote) {
+    \textbf{High-pass channel}\\
+    Mediastinal source, Gaussian blur subtraction, robust normalization, and lung-mask suppression.
+};
+
+\node[branch, below=10mm of representation, xshift=-2.75cm, fill=cnnGreen, draw=cnnGreenLine] (cnn) {
+    \textbf{CNN branch}\\
+    ResNet18 backbone\\
+    learned feature \(z_{i,j}\)
+};
+
+\node[branch, below=10mm of representation, xshift=2.75cm, fill=bovwPurple, draw=bovwPurpleLine] (bovw) {
+    \textbf{ORB-BoVW branch}\\
+    ORB descriptors; BoVW histogram \(b_{i,j}\);\\
+    projection to \(\bar{b}_{i,j}\)
+};
+
+\node[pipeline, below=35mm of representation, fill=fusionGray, draw=fusionGrayLine] (fuse) {
+    \textbf{Feature fusion}\\
+    \textit{Proposed ResNet18-3CH+BoVW model}\\
+    \(v_{i,j} = [z_{i,j};\bar{b}_{i,j}]\)
+};
+
+\node[pipeline, below=of fuse, fill=fusionGray, draw=fusionGrayLine] (head) {
+    \textbf{Regression head}\\
+    Slice-level score \(s_{i,j}=g_{\omega}(v_{i,j})\)
+};
+
+\node[pipeline, below=of head, fill=predRed, draw=predRedLine] (aggregation) {
+    \textbf{Patient-level aggregation}\\
+    Hybrid aggregation of mean and top-\(k\) slice scores\\
+    \(\hat{y}_i=A(\{s_{i,j}:j\in\mathcal{S}_i\})\)
+};
+
+\node[pipeline, below=of aggregation, fill=predRed, draw=predRedLine] (prediction) {
+    \textbf{Patient-level prediction}\\
+    Predicted mucus-burden score \(\hat{y}_i\), compared with \(y_i\)
+};
+
+\node[note, right=7mm of aggregation] (weaknote) {
+    \textbf{Weak supervision}\\
+    Selected slices inherit \(y_i\) during training. Slice scores are intermediate outputs, not verified slice-level mucus labels.
+};
+
+\draw[arrow] (volume) -- (preprocess);
+\draw[arrow] (preprocess) -- (selection);
+\draw[arrow] (selection) -- (representation);
+\draw[arrow] (representation.south) -- ++(0,-0.25) -| (cnn.north);
+\draw[arrow] (representation.south) -- ++(0,-0.25) -| (bovw.north);
+\draw[arrow] (cnn.south) -- ++(0,-0.45) -| (fuse.north);
+\draw[arrow] (bovw.south) -- ++(0,-0.45) -| (fuse.north);
+\draw[arrow] (fuse) -- (head);
+\draw[arrow] (head) -- (aggregation);
+\draw[arrow] (aggregation) -- (prediction);
+\draw[notearrow] (representation.east) -- (hpnote.west);
+\draw[notearrow] (aggregation.east) -- (weaknote.west);
+
+\end{tikzpicture}%
+}
+\caption[Proposed ResNet18-3CH+BoVW architecture]{Architecture of the proposed ResNet18-3CH+BoVW model used in the internal experiments. Selected CT slices are converted to the three-channel high-pass representation, ResNet18 CNN features and ORB-BoVW handcrafted features are fused at slice level, and the resulting slice-level scores are aggregated into one patient-level mucus-burden prediction. Training is weakly supervised because selected slices inherit the patient-level label, the slice scores are intermediate outputs rather than verified slice-level mucus labels.}
+\label{fig:proposed_model_architecture}
+\end{figure}
+
+
+
+\subsection{Notation}
+\label{sec:notation}
+
+This chapter uses the same basic notation as Chapter~3. For patient \(i\), the CT volume is written as
+\[
+X_i = \{x_{i,1}, x_{i,2}, \dots, x_{i,n_i}\},
+\]
+where \(x_{i,j}\) is axial slice \(j\), and \(n_i\) is the number of slices in the volume. The patient-level target is written as
+\[
+y_i \in \mathbb{R}.
+\]
+Table~\ref{tab:methodology_notation} summarizes the notation used in the methodology. Index sets are distinguished from the image sets they refer to, for example \(\mathcal{S}_i\) contains selected slice indices, while \(S_i\) contains the corresponding selected slices.
+
+For consistency with Chapter~3, all mathematical slice indices are written as \(j \in \{1,\dots,n_i\}\). In the Python implementation, the same slice positions are stored as zero-based array indices.
+
+\begin{table}[H]
+\centering
+\caption{Notation used in the methodology chapter.}
+\label{tab:methodology_notation}
+\begin{tabular}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+\(i\) & Patient or case index \\
+\(X_i\) & Full CT volume for patient \(i\) \\
+\(x_{i,j}\) & Axial slice \(j\) from volume \(X_i\) \\
+\(n_i\) & Number of slices in volume \(X_i\) \\
+\(\tilde{x}_{i,j}\) & Preprocessed version of slice \(x_{i,j}\) \\
+\(\tilde{X}_i\) & Preprocessed CT volume for patient \(i\) \\
+\(y_i\) & Patient-level target \\
+\(\hat{y}_i\) & Patient-level prediction \\
+\(\mathcal{C}_i\) & Candidate slice index set \\
+\(C_i\) & Candidate slice set \\
+\(\mathcal{F}_i\) & Filtered slice index set \\
+\(F_i\) & Filtered slice set \\
+\(\mathcal{G}_i\) & Reserved high-informativeness slice index set \\
+\(\mathcal{R}_i\) & Remaining filtered candidate index set for diversity sampling \\
+\(\mathcal{D}_i\) & Diversity-selected slice index set \\
+\(\mathcal{S}_i\) & Final selected slice index set \\
+\(S_i\) & Final selected slice set \\
+\(d_{i,j}\) & Low-resolution slice-selection descriptor for slice \(j\) \\
+\(p_{i,j}\) & PCA-projected slice-selection descriptor for slice \(j\) \\
+\(K_{\mathrm{sel}}\) & Requested number of selected slices per patient \\
+\(K_{\mathrm{inf},i}\) & Effective number of reserved informative slices for patient \(i\) \\
+\(K_{\mathrm{div},i}\) & Number of diversity-selected slices requested for patient \(i\) \\
+\(r_{i,j}\) & Model input representation for slice \(j\) \\
+\(z_{i,j}\) & CNN feature vector for slice \(j\) \\
+\(b_{i,j}\) & Handcrafted feature vector for slice \(j\), when used \\
+\(\bar{b}_{i,j}\) & Projected handcrafted feature vector, when used \\
+\(v_{i,j}\) & Fused feature vector for slice \(j\), when used \\
+\(s_{i,j}\) & Slice-level prediction score \\
+\(P_{\mathrm{prep}}\) & Fixed preprocessing operation \\
+\(R\) & Input-representation function \\
+\(\Phi_{\psi}\) & CNN feature extractor with parameters \(\psi\) \\
+\(g_{\omega}\) & Prediction head with parameters \(\omega\) \\
+\(\psi\) & Parameters of the CNN feature extractor \\
+\(\omega\) & Parameters of the prediction head \\
+\(\eta\) & Parameters of the handcrafted feature projection branch, when used \\
+\(\Theta\) & Full set of trainable model parameters \\
+\(A\) & Patient-level aggregation rule \\
+\(P_{\mathrm{PCA}}\) & PCA projection matrix used during slice selection \\
+\(\mu_k\) & Centroid of cluster \(k\) during representative selection \\
+\(k\) & Number of top slice scores used in top-\(k\) aggregation \\
+\(\lambda\) & Mixing weight used in hybrid aggregation, when applicable \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The notation keeps fixed operations and trainable model components separate. For example, \(P_{\mathrm{prep}}\) is fixed preprocessing, \(R\) constructs the model input representation, \(\Phi_{\psi}\) extracts CNN features, and \(g_{\omega}\) produces slice-level scores.
+
+
+\subsection{End-to-End Processing Pipeline}
+\label{sec:end_to_end_prediction_chain}
+
+The full pipeline can be summarized as the path from an indexed CT volume to one patient-level prediction:
+\[
+X_i
+\rightarrow
+\tilde{X}_i
+\rightarrow
+\mathcal{S}_i
+\rightarrow
+\{r_{i,j}: j \in \mathcal{S}_i\}
+\rightarrow
+\{z_{i,j}: j \in \mathcal{S}_i\}
+\rightarrow
+\{s_{i,j}: j \in \mathcal{S}_i\}
+\rightarrow
+\hat{y}_i.
+\]
+The chain shows the main stages: preprocessing, slice selection, input representation, feature extraction, slice-level prediction, and patient-level aggregation.
+
+The first step is preprocessing. Each raw slice \(x_{i,j}\) is transformed into a preprocessed slice
+\[
+\tilde{x}_{i,j} = P_{\mathrm{prep}}(x_{i,j}),
+\]
+where \(P_{\mathrm{prep}}(\cdot)\) denotes the fixed preprocessing operations applied before slice selection and model input construction. The preprocessed volume is then written as
+\[
+\tilde{X}_i
+=
+\{\tilde{x}_{i,1}, \tilde{x}_{i,2}, \dots, \tilde{x}_{i,n_i}\}.
+\]
+
+Slice selection defines the selected index set
+\[
+\mathcal{S}_i \subseteq \{1,\dots,n_i\},
+\]
+and the corresponding selected slice set is
+\[
+S_i
+=
+\{\tilde{x}_{i,j} : j \in \mathcal{S}_i\}.
+\]
+The construction of \(\mathcal{S}_i\) is described in Section~\ref{sec:slice_selection_strategy}. Only these selected slices are passed to the later model stages.
+
+Each selected slice is then converted into a model input representation:
+\[
+r_{i,j} = R(\tilde{x}_{i,j}),
+\qquad j \in \mathcal{S}_i,
+\]
+where \(R(\cdot)\) denotes the input-representation function. Depending on the experiment, this function produces either a two-window representation or a three-channel representation. The specific representations are described in Section~\ref{sec:input_representation}.
+
+The represented slice is passed through the CNN feature extractor:
+\[
+z_{i,j} = \Phi_{\psi}(r_{i,j}),
+\qquad j \in \mathcal{S}_i,
+\]
+where \(\Phi_{\psi}(\cdot)\) denotes the CNN backbone with trainable parameters \(\psi\). The prediction head maps this feature vector to a slice-level score,
+\[
+s_{i,j} = g_{\omega}(z_{i,j}),
+\qquad j \in \mathcal{S}_i,
+\]
+where \(g_{\omega}(\cdot)\) has trainable parameters \(\omega\). In experiments with handcrafted feature fusion, the CNN feature vector is first combined with a projected handcrafted feature vector before prediction. This gives a fused vector
+\[
+v_{i,j} = [z_{i,j}; \bar{b}_{i,j}],
+\]
+and the prediction head is applied to \(v_{i,j}\) instead of \(z_{i,j}\).
+
+The slice-level scores are then aggregated into one patient-level prediction:
+\[
+\hat{y}_i =
+A\bigl(\{s_{i,j} : j \in \mathcal{S}_i\}\bigr),
+\]
+where \(A(\cdot)\) denotes the patient-level aggregation rule. The implemented aggregation variants are described in Section~\ref{sec:patient_level_prediction_aggregation}.
+
+The prediction problem is therefore defined at patient level: the final model output \(\hat{y}_i\) is compared with the selected patient-level target \(y_i\). Conceptually, the desired patient-level regression objective can be written as
+\[
+\mathcal{L}_{\mathrm{patient}}
+=
+\frac{1}{|\mathcal{I}_{\mathrm{train}}|}
+\sum_{i \in \mathcal{I}_{\mathrm{train}}}
+\left(y_i - \hat{y}_i\right)^2.
+\]
+This expression describes the level at which the task and validation are defined. The implemented optimization uses weak slice-level training: sampled slice scores \(s_{i,j}\) are trained against the corresponding patient label, and patient-level aggregation is applied during validation and model selection. The exact training loss is described in Section~\ref{sec:learning_objective}. Aggregation settings such as \(k\) and \(\lambda\) are fixed experimental settings rather than trainable parameters.
+
+
+
+\section{Dataset and Target Definition}
+\label{sec:dataset_target_definition}
+
+This section defines the dataset objects used throughout the methodology. Each included case corresponds to one indexed chest CT examination and one patient-level mucus-burden target.
+
+
+\subsection{Dataset Description}
+\label{sec:dataset_description}
+
+The implemented pipeline is organized around a dataset index where each row corresponds to one patient-level case. The index links the patient identifier, stored imaging volume, target variables, and fold information. The original imaging studies come from chest CT examinations stored in DICOM format \cite{dicomstandard2026}, but the model does not read the raw DICOM series directly during training. Instead, each indexed case points to a stored volume through \texttt{volume\_path}.
+
+For patient \(i\), the CT volume is denoted as
+\[
+X_i = \{x_{i,1}, x_{i,2}, \dots, x_{i,n_i}\},
+\]
+where \(x_{i,j}\) is the \(j\)-th axial slice and \(n_i\) is the number of slices in the volume. In array form, the stored volume can be written as
+\[
+X_i \in \mathbb{R}^{n_i \times H_i \times W_i},
+\]
+where \(H_i\) and \(W_i\) are the in-plane image dimensions before later resizing or model-specific input transformation.
+
+
+\subsection{Cohort Selection and Inclusion Criteria}
+\label{sec:cohort_selection_inclusion_criteria}
+
+The study cohort contains
+\[
+N = 32
+\]
+indexed patient cases. Because the cohort is small, unsuitable cases can have a large influence on model fitting, validation, and interpretation.
+
+The final cohort was defined by retaining cases that had both a usable chest CT volume and an associated patient-level mucus-burden target. Let \(\mathcal{I}\) denote the set of included patient indices:
+\[
+\mathcal{I}
+=
+\{i : X_i \text{ is a valid chest CT examination and } y_i \text{ is available}\}.
+\]
+The number of included cases is therefore
+\[
+|\mathcal{I}| = N.
+\]
+
+Preprocessing, slice selection, training, and evaluation are applied only to cases in \(\mathcal{I}\), ensuring that every modelled case has both a valid imaging input and a patient-level target.
+
+
+\subsection{CT Examination Selection}
+\label{sec:ct_examination_selection}
+
+During dataset preparation, the indexed imaging files were checked to ensure that they corresponded to usable chest CT examinations. Records with non-lung content or otherwise unsuitable acquisitions were excluded before preprocessing and model development.
+
+For each retained patient \(i \in \mathcal{I}\), the pipeline uses the stored volume referenced by the corresponding \texttt{volume\_path} entry in the dataset index. This volume defines the imaging input \(X_i\) used in the later stages:
+\[
+\texttt{volume\_path}_i \longmapsto X_i,
+\qquad i \in \mathcal{I}.
+\]
+This case-level selection is separate from the slice-selection strategy in Section~\ref{sec:slice_selection_strategy}, which is applied later within each included volume.
+
+
+\subsection{Patient-Level Target Definition}
+\label{sec:patient_level_target_definition}
+
+The target variable represents the patient-level mucus-burden score for each included CT examination. The raw target is based on two independent reader assessments:
+\[
+y_i^{(1)}
+\quad \text{and} \quad
+y_i^{(2)}
+\]
+The raw patient-level target is defined as the median of these two scores:
+\[
+y_i^{(\mathrm{raw})}
+=
+\operatorname{median}\!\left(y_i^{(1)}, y_i^{(2)}\right).
+\]
+With two reader scores, this median corresponds to the midpoint when the two assessments differ. This is why the stored raw target can contain intermediate values, even if the individual reader scores are assigned on a discrete scoring scale.
+
+In the dataset index, the resulting raw patient-level target is stored as \texttt{label}. In the included cohort, the observed raw mucus-burden labels satisfy
+\[
+0.0 \leq y_i^{(\mathrm{raw})} \leq 7.5
+\]
+The raw target is treated as continuous because it represents burden magnitude rather than class membership.
+
+The dataset index also contains a transformed version of the same target, stored as \texttt{label\_log10}. This stored field is denoted by
+\[
+y_i^{(\log)}.
+\]
+The implementation uses the precomputed \texttt{label\_log10} value from the dataset index rather than recomputing the transformation during training. The raw target was used in earlier baseline experiments, while the main internal configuration uses the log-transformed target. When a model is trained on \texttt{label\_log10}, predictions can be transformed back to the raw mucus-score scale before reporting MAE and RMSE.
+
+To keep the later methodology notation compact, \(y_i\) denotes the selected target variable for the experiment being described:
+\[
+y_i
+=
+\begin{cases}
+y_i^{(\mathrm{raw})}, & \text{raw-label experiments},\\
+y_i^{(\log)}, & \text{main log-target configuration}.
+\end{cases}
+\]
+Each included case can therefore be represented as
+\[
+\left(X_i, y_i^{(\mathrm{raw})}, y_i^{(\log)}, \mathrm{id}_i\right),
+\qquad i \in \mathcal{I},
+\]
+where \(X_i\) is the CT volume, \(y_i^{(\mathrm{raw})}\) is the raw patient-level mucus-burden target, \(y_i^{(\log)}\) is the stored log-transformed target, and \(\mathrm{id}_i\) is the patient or case identifier.
+
+
+
+\subsection{External Transfer Dataset: MosMed}
+\label{sec:external_transfer_dataset_mosmed}
+
+In addition to the internal mucus-score dataset, MosMedData is used for the transfer-learning experiments. MosMedData is a public chest CT dataset containing 1110 CT scans collected during the COVID-19 epidemic \cite{morozov2020mosmeddata}. In this thesis, it is used as an external transfer dataset, not as external validation for mucus-burden prediction, because its target describes a different case-level CT task.
+
+For a MosMed case \(i\), the CT volume is written as
+\[
+X_i^{(\mathrm{M})},
+\]
+with a corresponding case-level target
+\[
+y_i^{(\mathrm{M})}.
+\]
+The superscript \((\mathrm{M})\) is used only to indicate that the case belongs to the MosMed dataset.
+
+The MosMed target is an ordinal case-level CT severity label related to COVID-19 lung involvement. In MosMedData, the CT severity categories range from cases without CT signs of viral pneumonia to cases with severe lung involvement \cite{morozov2020mosmeddata}. In the implementation, this case-level label is represented as an ordinal numerical target,
+\[
+y_i^{(\mathrm{M})} \in \{0,1,2,3,4\},
+\]
+where lower values correspond to no or limited CT involvement and higher values correspond to more extensive CT involvement.
+
+This target is not a mucus-burden score. MosMed is therefore used only to study representation transfer and domain shift between related CT tasks. The model is trained or evaluated on the MosMed severity target when MosMed is the target domain, and on the internal mucus-burden target when the mucus dataset is the target domain.
+
+
+
+
+\section{Data Preprocessing}
+\label{sec:data_preprocessing}
+
+Data preprocessing converts indexed stored CT volumes into HU-like slice arrays used by slice selection and model input construction. For each patient \(i\), the input volume is written as
+\[
+X_i = \{x_{i,1}, x_{i,2}, \dots, x_{i,n_i}\},
+\qquad
+X_i \in \mathbb{R}^{n_i \times H_i \times W_i},
+\]
+where \(n_i\) is the number of axial slices and \(H_i\) and \(W_i\) are the original in-plane dimensions. The preprocessing operation is denoted by \(P_{\mathrm{prep}}\). Applied slice-wise, it gives
+\[
+\tilde{x}_{i,j} = P_{\mathrm{prep}}(x_{i,j}),
+\]
+and the corresponding preprocessed volume is
+\[
+\tilde{X}_i =
+\{\tilde{x}_{i,1}, \tilde{x}_{i,2}, \dots, \tilde{x}_{i,n_i}\}.
+\]
+The operation \(P_{\mathrm{prep}}\) is fixed and contains no trainable model parameters. Window-specific channel construction and resizing to the final CNN input size are described separately in Section~\ref{sec:input_representation}.
+
+
+\subsection{Volume Loading}
+\label{sec:volume_loading}
+
+For each included case \(i\), the workflow loads the CT volume from \texttt{volume\_path}. Let \(p_i\) denote this stored path. The original imaging studies are DICOM examinations \cite{dicomstandard2026}, but the training pipeline does not read the raw DICOM files directly:
+\[
+X_i = \mathrm{Load}(p_i).
+\]
+In the internal CT pipeline, these stored volumes are loaded as NumPy arrays using \texttt{np.load}, with memory mapping. The loaded array is interpreted as an ordered axial stack with shape
+\[
+X_i \in \mathbb{R}^{n_i \times H_i \times W_i}.
+\]
+The slice \(x_{i,j}\) therefore represents slice \(j\) along the first array dimension. Metadata such as slice count and voxel spacing are stored in the dataset index, but model-input construction operates on the loaded volume array.
+
+
+\subsection{Intensity Normalization}
+\label{sec:intensity_normalization}
+
+The stored internal volumes are treated as HU-like arrays, meaning that the numerical values are interpreted as CT attenuation-style intensities following the Hounsfield scale convention \cite{hounsfield1973computerized}. Before slice-level quality-control metrics and representation-specific helper functions are applied, intensities are clipped to a canonical range:
+\[
+a_{\mathrm{HU}} = -1350,
+\qquad
+b_{\mathrm{HU}} = 600
+\]
+represent the lower and upper canonical clipping bounds. For a slice \(x_{i,j}\), clipping is written as
+\[
+x^{(\mathrm{clip})}_{i,j}
+=
+\min\!\left(\max\!\left(x_{i,j}, a_{\mathrm{HU}}\right), b_{\mathrm{HU}}\right).
+\]
+After clipping, the values are scaled to the interval \([0,1]\) when a normalized helper image is needed:
+\[
+x^{(\mathrm{norm})}_{i,j}
+=
+\frac{x^{(\mathrm{clip})}_{i,j} - a_{\mathrm{HU}}}
+{b_{\mathrm{HU}} - a_{\mathrm{HU}}}.
+\]
+This gives slice-selection descriptors and later channel-construction helpers a consistent numerical range. In this chapter, \(\tilde{x}_{i,j}\) denotes the HU-like preprocessed slice after loading and canonical intensity handling. Temporary normalized helper images such as \(x^{(\mathrm{norm})}_{i,j}\) are used inside later selection and representation functions, but they are not the final CNN input representation.
+
+
+\subsection{Spatial Handling and Input Resizing}
+\label{sec:spatial_handling_input_resizing}
+
+The implementation does not perform physical voxel-spacing resampling before slice selection. The axial slice count \(n_i\) is not resampled, and no spacing normalization is applied along the \(z\)-axis before representative slice indices are selected.
+
+The stored HU-like slices are also not resized globally before slice selection. The sampling procedure operates on the loaded volume array. A separate low-resolution descriptor image is created only for PCA and clustering, as described in Section~\ref{sec:feature_extraction_slice_selection}.
+
+The fixed CNN input size is
+\[
+H_0 = W_0 = 256.
+\]
+This resizing is applied slice-wise during input-representation construction. After a selected slice index \(j \in \mathcal{S}_i\) has been retrieved, the slice is converted into the model input tensor
+\[
+r_{i,j}
+=
+R(\tilde{x}_{i,j}),
+\]
+where \(R(\cdot)\) includes HU clipping, window normalization, resizing to \(256 \times 256\), channel stacking, and the optional high-frequency channel described in Section~\ref{sec:input_representation}.
+
+
+
+\section{Slice Selection Strategy}
+\label{sec:slice_selection_strategy}
+
+The CNN is not given every axial slice from a CT volume. Instead, the pipeline selects a representative subset from each preprocessed volume before input-representation construction.
+
+For patient \(i\), the preprocessed CT volume is written as
+\[
+\tilde{X}_i =
+\{\tilde{x}_{i,1}, \tilde{x}_{i,2}, \dots, \tilde{x}_{i,n_i}\},
+\]
+where the slices are ordered along the axial direction. The selected slice indices are denoted by
+\[
+\mathcal{S}_i \subseteq \{1,\dots,n_i\}.
+\]
+The corresponding selected slice set is
+\[
+S_i =
+\{\tilde{x}_{i,j}: j \in \mathcal{S}_i\}.
+\]
+These selected slices are passed to the input-representation stage described in Section~\ref{sec:input_representation}.
+
+
+
+\subsection{Overview of the Selection Pipeline}
+\label{sec:overview_selection_pipeline}
+
+Slice selection is treated as a fixed preprocessing step applied separately to each CT volume:
+\[
+\tilde{X}_i
+\rightarrow
+\mathcal{C}_i
+\rightarrow
+\mathcal{F}_i
+\rightarrow
+\{d_{i,j}\}_{j \in \mathcal{F}_i}
+\rightarrow
+\{p_{i,j}\}_{j \in \mathcal{F}_i}
+\rightarrow
+\mathcal{S}_i.
+\]
+The pipeline first keeps a central candidate set \(\mathcal{C}_i\). It then filters this set using simple quality-control and informativeness checks, giving the filtered index set \(\mathcal{F}_i\). For the remaining slices, lightweight descriptors \(d_{i,j}\) are computed only for the purpose of slice selection. These descriptors are reduced with PCA to obtain \(p_{i,j}\), and MiniBatchKMeans is then used to choose slices that cover different parts of the descriptor space. A small set of high-informativeness slices is reserved before the diversity-based fill step.
+
+This procedure is not trained to detect mucus plugs. It uses no patient targets, slice-level labels, or CNN features; it only chooses a stable and varied set of axial slices before prediction.
+
+
+\subsection{Central Slice Restriction}
+\label{sec:central_slice_restriction}
+
+The first step restricts sampling to the central portion of the axial stack. In the final implementation, the center fraction is
+\[
+\rho_{\mathrm{center}} = 0.75.
+\]
+For a volume with \(n_i\) slices, the implemented central restriction corresponds to a symmetric integer margin
+\[
+m_i =
+\left\lfloor
+\frac{(1-\rho_{\mathrm{center}})n_i}{2}
+\right\rfloor,
+\]
+with one-based lower and upper limits
+\[
+j_{\min,i} = m_i + 1,
+\qquad
+j_{\max,i} = n_i - m_i.
+\]
+The central candidate index set is therefore
+\[
+\mathcal{C}_i =
+\{j : j_{\min,i} \leq j \leq j_{\max,i}\}.
+\]
+If the central candidate set contains no valid index, the implementation falls back to the middle slice. If the number of central candidates is already less than or equal to the requested number of representative slices, all central candidates are returned without further reduction.
+
+
+\subsection{Informativeness Filtering}
+\label{sec:informativeness_filtering}
+
+After central restriction, the implementation computes simple per-slice quality-control and informativeness measures from the HU-like slice values. Before these measures are computed, each slice is clipped to \([-1350,600]\). The threshold choices are HU-informed implementation heuristics, not diagnostic thresholds \cite{whiting2015ctbasic,dejong2005ctairways}.
+
+For each candidate slice \(j \in \mathcal{C}_i\), the code computes
+\[
+\mathrm{lung\_frac}_{i,j},\quad
+\mathrm{air\_frac}_{i,j},\quad
+\mathrm{hi\_dens\_frac}_{i,j},\quad
+\mathrm{body\_frac}_{i,j},\quad
+\mathrm{mean\_hu}_{i,j},\quad
+\mathrm{std\_hu}_{i,j}.
+\]
+These quantities are implementation-level descriptors rather than clinical measurements. \(\mathrm{lung\_frac}_{i,j}\) is the fraction below \(-350\) HU and acts as a rough lung-like content proxy. \(\mathrm{air\_frac}_{i,j}\) is the fraction below \(-950\) HU and detects slices that are almost entirely air-like. \(\mathrm{hi\_dens\_frac}_{i,j}\) counts pixels within the rough lung mask above \(-200\) HU, while \(\mathrm{body\_frac}_{i,j}\) is based on the fraction above \(-300\) HU. These cutoffs are used only to remove clearly unhelpful slices and rank filtered slices for reserved inclusion.
+
+The filtering decision is written as a binary function
+\[
+q(\tilde{x}_{i,j}) \in \{0,1\}.
+\]
+In the implemented configuration, a slice is retained when
+\[
+q(\tilde{x}_{i,j}) = 1
+\quad \Longleftrightarrow \quad
+\mathrm{lung\_frac}_{i,j} \geq 0.06,\quad
+\mathrm{air\_frac}_{i,j} \leq 0.98,\quad
+\mathrm{body\_frac}_{i,j} \leq 0.45.
+\]
+The filtered index set is therefore
+\[
+\mathcal{F}_i =
+\{j \in \mathcal{C}_i : q(\tilde{x}_{i,j}) = 1\},
+\]
+with
+\[
+F_i =
+\{\tilde{x}_{i,j}: j \in \mathcal{F}_i\}.
+\]
+If no slices pass the filter, the implementation falls back to evenly spaced slices from the central candidate set. If too few slices remain for the requested selection size, all filtered slices are returned without diversity sampling.
+
+The same metrics reserve a subset of high-informativeness slices before diversity sampling. Filtered slices are ranked by \(\mathrm{hi\_dens\_frac}_{i,j}\), and the highest-ranked slices are included before clustering-based fill. The effective number of reserved informative slices is
+\[
+K_{\mathrm{inf},i}
+=
+\min\!\left(
+N_{\mathrm{informative}},
+|\mathcal{F}_i|,
+\max(8,\lfloor K_{\mathrm{sel}}/6 \rfloor)
+\right).
+\]
+With \(K_{\mathrm{sel}}=160\), this caps the effective informative subset at \(26\) slices when enough filtered candidates are available, even though \(N_{\mathrm{informative}}=30\).
+
+
+\subsection{Feature Extraction for Slice Selection}
+\label{sec:feature_extraction_slice_selection}
+
+The descriptors used for diversity sampling are separate from CNN features; \(z_{i,j}\) is reserved for CNN feature vectors later in the methodology.
+
+For each filtered slice \(j \in \mathcal{F}_i\), the implementation constructs a lightweight descriptor
+\[
+d_{i,j}
+=
+D_{\mathrm{sel}}(\tilde{x}_{i,j}).
+\]
+The descriptor is formed from a low-resolution version of the HU-like slice. In the implementation, the retained slices are clipped to \([-1350,400]\), mapped to \([0,1]\), downsampled to \(64 \times 64\), and flattened. Thus,
+\[
+d_{i,j}
+=
+\operatorname{vec}\!\left(
+\operatorname{Down}_{64 \times 64}(\tilde{x}_{i,j})
+\right),
+\qquad
+d_{i,j} \in \mathbb{R}^{4096}.
+\]
+The descriptor matrix for patient \(i\) is standardized feature-wise before PCA:
+\[
+\bar{d}_{i,j}
+=
+\frac{d_{i,j} - \mu_d}{\sigma_d + \epsilon},
+\]
+where \(\mu_d\) and \(\sigma_d\) are computed over the filtered slices from the same patient volume. These descriptors support only unsupervised representative selection and are not passed to the final CNN regressor.
+
+
+\subsection{Dimensionality Reduction (PCA)}
+\label{sec:dimensionality_reduction_pca}
+
+After standardization, PCA is fitted to the slice-selection descriptors for the current patient volume. Using \(P_{\mathrm{PCA}}\) to denote the fitted projection matrix, the reduced descriptor is written as
+\[
+p_{i,j}
+=
+P_{\mathrm{PCA}}^{\top}\bar{d}_{i,j},
+\qquad j \in \mathcal{F}_i.
+\]
+The configured PCA component cap is
+\[
+N_{\mathrm{PCA}} = 24.
+\]
+The effective number of components is computed as
+\[
+r_i =
+\min\!\left(
+N_{\mathrm{PCA}},
+4096,
+|\mathcal{F}_i|-1
+\right),
+\]
+so the PCA dimensionality is reduced automatically if too few filtered slices are available. PCA reduces the feature dimension before clustering, consistent with its general role in high-dimensional medical-image feature workflows \cite{mwangi2014feature}. If PCA fitting fails, the implementation falls back to the standardized descriptors \(\bar{d}_{i,j}\) without projection.
+
+
+\subsection{Diversity Sampling with MiniBatchKMeans}
+\label{sec:diversity_sampling_minibatchkmeans}
+
+After filtering and descriptor projection, the remaining step is to complete the selected slice set with slices that cover variation within the filtered candidate pool. Let \(\mathcal{G}_i \subseteq \mathcal{F}_i\) denote the reserved high-informativeness slice indices described in Section~\ref{sec:informativeness_filtering}. The remaining candidates for diversity sampling are
+\[
+\mathcal{R}_i
+=
+\mathcal{F}_i \setminus \mathcal{G}_i.
+\]
+The number of additional slices requested from the diversity-sampling stage is
+\[
+K_{\mathrm{div},i}
+=
+K_{\mathrm{sel}} - |\mathcal{G}_i|.
+\]
+The effective number of diversity clusters is
+\[
+K^{(\mathrm{eff})}_{\mathrm{div},i}
+=
+\min\!\left(K_{\mathrm{div},i}, |\mathcal{R}_i|\right).
+\]
+
+When \(K^{(\mathrm{eff})}_{\mathrm{div},i} > 0\), MiniBatchKMeans is fitted to the PCA-projected descriptors \(\{p_{i,j}: j \in \mathcal{R}_i\}\). MiniBatchKMeans is a computationally efficient variant of k-means clustering \cite{sculley2010minibatch}. The clustering objective can be written as
+\[
+\min_{\{\mu_k\}_{k=1}^{K^{(\mathrm{eff})}_{\mathrm{div},i}}}
+\sum_{j \in \mathcal{R}_i}
+\min_{1 \leq k \leq K^{(\mathrm{eff})}_{\mathrm{div},i}}
+\left\|p_{i,j} - \mu_k\right\|_2^2,
+\]
+where \(\mu_k\) denotes the centroid of cluster \(k\). This step chooses candidates that cover different regions of the projected descriptor space; it does not assign clinical labels to slices.
+
+For each centroid, the representative diversity slice is chosen as the remaining filtered slice whose projected descriptor is closest to that centroid:
+\[
+j_k^{*}
+=
+\arg\min_{j \in \mathcal{R}_i}
+\left\|p_{i,j} - \mu_k\right\|_2^2,
+\qquad
+k = 1,\dots,K^{(\mathrm{eff})}_{\mathrm{div},i}.
+\]
+The resulting diversity-selected indices are
+\[
+\mathcal{D}_i
+=
+\{j_1^{*}, j_2^{*}, \dots, j_{K^{(\mathrm{eff})}_{\mathrm{div},i}}^{*}\}.
+\]
+The same slice can be nearest to more than one centroid, so \(\mathcal{D}_i\) may contain duplicate indices before post-processing.
+
+The final selected index set is constructed by combining the reserved informative indices with the diversity-selected indices:
+\[
+\mathcal{S}_i
+=
+\operatorname{EnsureUnique}_{K_{\mathrm{sel}}}
+\left(
+[\mathcal{G}_i,\mathcal{D}_i]
+\right).
+\]
+Here, \([\mathcal{G}_i,\mathcal{D}_i]\) is the ordered candidate list, with reserved informative slices placed before diversity-selected slices. The \(\operatorname{EnsureUnique}_{K_{\mathrm{sel}}}(\cdot)\) helper removes duplicate indices, keeps only valid filtered candidates, and returns the final selected indices in ascending axial order.
+
+If MiniBatchKMeans fitting fails, or if there are too few remaining candidates for clustering, the implementation falls back to evenly spaced indices from the available filtered candidate set. The same uniqueness, validity, and sorting step is then applied before returning \(\mathcal{S}_i\).
+
+
+\subsection{Final Selection Configuration}
+\label{sec:final_selection_configuration}
+
+Table~\ref{tab:slice_selection_configuration} summarizes the final slice-selection configuration. These settings define the slice-selection stage only, where input representation, CNN feature extraction, and patient-level aggregation are described later.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Final configuration for slice selection strategy.}
+\label{tab:slice_selection_configuration}
+\begin{tabular}{p{0.27\textwidth}p{0.18\textwidth}p{0.45\textwidth}}
+\toprule
+Parameter & Value & Usage \\
+\midrule
+\texttt{CENTER\_FRACTION} & \(0.75\) & Retains the central portion of the axial stack before filtering, reducing the influence of extreme scan ends. \\
+\texttt{N\_SLICES\_REP} & \(160\) & Requested number of representative slices selected per patient when enough valid candidates are available. \\
+\texttt{FEAT\_HW} & \(64\) & Defines the low-resolution spatial size used to construct flattened descriptors for diversity sampling. \\
+\texttt{N\_PCA} & \(24\) & Maximum number of PCA components used to compress slice-selection descriptors before clustering. \\
+\texttt{LUNG\_HU\_THR} & \(-350\) HU & Threshold used to form a rough lung/air proxy for slice-level filtering and descriptor statistics. \\
+\texttt{MIN\_LUNG\_FRAC} & \(0.06\) & Minimum required fraction of pixels below \texttt{LUNG\_HU\_THR}; removes slices with little lung-like content. \\
+\texttt{MAX\_AIR\_FRAC} & \(0.98\) & Maximum allowed fraction of very low-density air-like pixels, removes slices that are almost entirely air. \\
+\texttt{HI\_DENS\_THR} & \(-200\) HU & Threshold used within the rough lung mask to rank slices by high-density content for informative-slice reservation. \\
+\texttt{N\_INFORMATIVE} & \(30\) & Upper cap on the number of high-informativeness slices considered for reserved inclusion before diversity sampling. \\
+\texttt{MAX\_BODY\_FRAC} & \(0.45\) & Maximum allowed body/soft-tissue-dominant fraction, reduces inclusion of slices dominated by non-lung tissue. \\
+\texttt{HU\_CANON\_MIN} & \(-1350\) HU & Lower bound of the canonical HU-like clipping range used for QC and heuristic slice-selection metrics. \\
+\texttt{HU\_CANON\_MAX} & \(600\) HU & Upper bound of the canonical HU-like clipping range used for QC and heuristic slice-selection metrics. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The selected indices are returned in ascending axial order before the corresponding slices are exposed to the later input-representation stage. If fewer than \texttt{N\_SLICES\_REP} valid candidates are available after filtering and fallback handling, the implementation returns the available valid subset rather than duplicating slices to force a fixed count.
+
+
+
+\section{Input Representation}
+\label{sec:input_representation}
+
+After slice selection, each selected preprocessed slice \(\tilde{x}_{i,j}\), \(j \in \mathcal{S}_i\), is converted into a multi-channel array before CNN feature extraction. This stage defines the representation function
+\[
+r_{i,j}
+=
+R(\tilde{x}_{i,j}),
+\qquad
+j \in \mathcal{S}_i,
+\]
+where \(r_{i,j}\) is the model input representation for the selected slice. In the implemented workflow, \(R(\cdot)\) is either a two-window CT representation or an extended three-channel representation. All channels are stored in channel-first format and resized to the common in-plane size \(H_0=W_0=256\).
+
+
+\subsection{Baseline Representation (Two-Window)}
+\label{sec:baseline_representation_two_window}
+
+The baseline input representation stacks two CT intensity windows: a lung window and a mediastinal window \cite{whiting2015ctbasic,lu2020multiwindow}.
+
+For a window \(w\) with lower and upper HU bounds \(a_w\) and \(b_w\), the implemented windowing operation is
+\[
+W_w(\tilde{x})
+=
+\frac{
+\min\!\left(\max\!\left(\tilde{x}, a_w\right), b_w\right)-a_w
+}{
+b_w-a_w+\epsilon
+},
+\]
+with \(\epsilon=10^{-6}\) in the implementation, followed by slice-wise resizing to \(256 \times 256\) and clipping to \([0,1]\). The lung-window bounds are
+\[
+a_{\mathrm{lung}}=-1350,
+\qquad
+b_{\mathrm{lung}}=150,
+\]
+and the mediastinal-window bounds are
+\[
+a_{\mathrm{med}}=-160,
+\qquad
+b_{\mathrm{med}}=240.
+\]
+Thus, for a selected slice \(\tilde{x}_{i,j}\), the two windowed channels are
+\[
+x_{i,j}^{(\mathrm{lung})}
+=
+W_{\mathrm{lung}}(\tilde{x}_{i,j}),
+\qquad
+x_{i,j}^{(\mathrm{med})}
+=
+W_{\mathrm{med}}(\tilde{x}_{i,j}).
+\]
+The two-channel baseline representation is then
+\[
+r_{i,j}^{(2)}
+=
+\left[
+x_{i,j}^{(\mathrm{lung})};
+x_{i,j}^{(\mathrm{med})}
+\right]
+\in
+\mathbb{R}^{2 \times 256 \times 256}.
+\]
+This representation is used as the baseline input format for the two-window experiments and as the shared foundation for the three-channel variants.
+
+
+\subsection{Extended Representations (Three-Channel Variants)}
+\label{sec:extended_representations_three_channel}
+The extended representations keep the lung and mediastinal channels and append a third channel derived from a fixed high-frequency or local-structure transform. The high-pass, Difference-of-Gaussians, Laplacian-of-Gaussian, and DCT-based variants are standard image-processing operations, in this thesis they are used only as implemented third-channel construction rules rather than as trainable model components \cite{gonzalez2018digital}. For a third-channel method \(m\), the implemented representation is written as
+\[
+r_{i,j}^{(3,m)}
+=
+\left[
+x_{i,j}^{(\mathrm{lung})};
+x_{i,j}^{(\mathrm{med})};
+h_{i,j}^{(m)}
+\right],
+\qquad
+h_{i,j}^{(m)}
+=
+H_m(u_{i,j}),
+\]
+where \(u_{i,j}\) is the normalized base channel used to construct the third channel. The implementation supports deriving \(u_{i,j}\) from either the lung-window channel or the mediastinal-window channel through the \texttt{HF\_FROM} setting. In the main high-pass configuration, this source is the mediastinal-window channel.
+
+The main high-frequency variant uses Gaussian blur subtraction. A smoothed version of the base image is subtracted from the original base image, so the resulting response emphasizes local intensity changes relative to the surrounding low-frequency content. With \(G_{\sigma}(\cdot)\) denoting Gaussian smoothing, the implemented high-pass channel is
+\[
+H_{\mathrm{HP}}(u)
+=
+N_{\mathrm{HF}}\!\left(u-G_{\sigma_{\mathrm{HP}}}(u)\right),
+\qquad
+\sigma_{\mathrm{HP}}=2.0,
+\]
+where \(N_{\mathrm{HF}}(\cdot)\) denotes robust third-channel normalization. In the implementation, this normalization clips the response using the 1st and 99th percentiles and rescales it to \([0,1]\).
+
+The Difference-of-Gaussians variant is implemented as
+\[
+H_{\mathrm{DoG}}(u)
+=
+N_{\mathrm{HF}}\!\left(
+G_{\sigma_1}(u)-G_{\sigma_2}(u)
+\right),
+\qquad
+\sigma_1=1.0,\quad
+\sigma_2=3.0.
+\]
+This variant compares smoothed versions of the same base channel at two spatial scales and keeps the normalized difference as the third channel.
+
+The Laplacian-of-Gaussian variant first smooths the base channel and then applies a Laplacian operation:
+\[
+H_{\mathrm{LoG}}(u)
+=
+N_{\mathrm{HF}}\!\left(
+\nabla^2 G_{\sigma_{\mathrm{LoG}}}(u)
+\right).
+\]
+The LoG smoothing scale follows the corresponding run configuration and is not treated as a fixed setting in the main high-pass configuration.
+
+A DCT-based third-channel variant is also implemented. In this variant, DCT coefficients are computed from the base channel, the lowest-frequency \(16 \times 16\) coefficient block is removed, the image is reconstructed with the inverse transform, the absolute value is taken, and the same robust normalization is applied. In the DCT configuration, no additional high-frequency cutoff is applied after the low-frequency removal.
+
+When lung-mask suppression is enabled, the third-channel response is multiplied by a soft rough lung mask. The main high-pass configuration enables this option. The mask suppresses responses outside the approximate lung region, it is not a supervised segmentation target or localization output.
+
+
+
+\subsection{Representation Used in Experiments}
+\label{sec:representation_used_experiments}
+
+The experiments use the two-window representation and selected three-channel extensions as input formats. The selected representation is summarized as
+\[
+r_{i,j}
+=
+\begin{cases}
+r_{i,j}^{(2)}, & \text{two-window experiments},\\
+r_{i,j}^{(3,m)}, & \text{three-channel experiments with variant } m.
+\end{cases}
+\]
+The two-window baseline uses \(C=2\) input channels. The three-channel experiments use \(C=3\), where the third channel is configured by \texttt{HF\_MODE}. The high-pass representation is the main three-channel configuration, while DoG, LoG, and DCT-based inputs are included as comparison variants.
+
+
+\begin{table}[H]
+\centering
+\small
+\caption{Main settings for the high-pass input representation.}
+\label{tab:input_representation_settings}
+\begin{tabular}{p{0.35\textwidth}p{0.22\textwidth}p{0.33\textwidth}}
+\toprule
+Setting & Value & Use \\
+\midrule
+Image size & \(256 \times 256\) & Fixed in-plane size for all input channels. \\
+Lung window & \([-1350,150]\) HU & First channel in all two-window and three-channel inputs. \\
+Mediastinal window & \([-160,240]\) HU & Second channel in all two-window and three-channel inputs. \\
+Main high-pass source & \texttt{medi} & Base channel for the main high-pass representation. \\
+Main high-pass scale & \(\sigma_{\mathrm{HP}}=2.0\) & Gaussian scale used before high-pass subtraction. \\
+HF normalization & 1st--99th percentile & Robust rescaling of third-channel responses to \([0,1]\). \\
+HF lung-mask suppression & Enabled for main high-pass & Suppresses third-channel response outside the approximate lung region. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+Figure~\ref{fig:highpass_masking_example} shows the high-pass third channel before and after mediastinal-mask suppression.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.38\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/highpass_unmasked_example.png}
+    \caption{Without suppression.}
+    \label{fig:highpass_unmasked}
+\end{subfigure}
+\hspace{0.04\textwidth}
+\begin{subfigure}[t]{0.38\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/highpass_masked_example.png}
+    \caption{With suppression.}
+    \label{fig:highpass_masked}
+\end{subfigure}
+\caption{High-pass third-channel representation before and after lung-mask suppression.}
+\label{fig:highpass_masking_example}
+\end{figure}
+
+The representation stage ends with a channel-first tensor \(r_{i,j}\), which is passed to the CNN feature-extraction stage in Section~\ref{sec:feature_extraction_model_architecture}.
+
+
+\section{Feature Extraction and Model Architecture}
+\label{sec:feature_extraction_model_architecture}
+
+This section describes the slice-level mapping from input representation \(r_{i,j}\) to learned feature vector \(z_{i,j}\), slice score \(s_{i,j}\), and in fusion experiments the combined learned--handcrafted representation. For a selected slice \(j \in \mathcal{S}_i\), the standard CNN path is
+\[
+z_{i,j}
+=
+\Phi_{\psi}(r_{i,j}),
+\qquad
+s_{i,j}
+=
+g_{\omega}(z_{i,j}),
+\]
+where \(\Phi_{\psi}\) denotes the CNN feature extractor with parameters \(\psi\), and \(g_{\omega}\) denotes the trainable regression head with parameters \(\omega\).
+
+When handcrafted features are enabled, the learned CNN feature vector is combined with a handcrafted feature vector before slice-level prediction. Let \(b_{i,j}\) denote the original handcrafted feature vector for slice \(j\), and let \(q_{\eta}\) denote the trainable handcrafted projection branch with parameters \(\eta\). The fusion path is written as
+\[
+\bar{b}_{i,j}
+=
+q_{\eta}(b_{i,j}),
+\qquad
+v_{i,j}
+=
+\left[z_{i,j}; \bar{b}_{i,j}\right],
+\qquad
+s_{i,j}
+=
+g_{\omega}(v_{i,j}).
+\]
+Here \(\bar{b}_{i,j}\) is the projected handcrafted representation and \(v_{i,j}\) is the fused feature vector. Patient-level aggregation is described in Section~\ref{sec:patient_level_prediction_aggregation}.
+
+
+\subsection{CNN Backbones}
+\label{sec:cnn_backbones}
+
+The CNN input for each selected slice is the channel-first tensor
+\[
+r_{i,j}
+\in
+\mathbb{R}^{C \times 256 \times 256},
+\qquad
+j \in \mathcal{S}_i,
+\]
+where \(C=2\) for the two-window representation and \(C=3\) for the three-channel variants described in Section~\ref{sec:input_representation}. The implementation defines a backbone-dependent feature extractor
+\[
+z_{i,j}^{(B)}
+=
+\Phi_{\psi}^{(B)}(r_{i,j}),
+\]
+where \(B\) denotes the selected backbone type. The corresponding slice-level prediction is
+\[
+s_{i,j}^{(B)}
+=
+g_{\omega}^{(B)}(z_{i,j}^{(B)}).
+\]
+
+The implementation uses torchvision backbones as feature extractors. Since these backbones expect three-channel input, the model includes an input projection stage. If \(C=3\), this projection is the identity map. If \(C \neq 3\), then add a trainable \(1 \times 1\) convolution from \(C\) channels to three channels:
+\[
+r'_{i,j}
+=
+P_{\mathrm{in}}(r_{i,j}),
+\qquad
+P_{\mathrm{in}}:
+\mathbb{R}^{C \times 256 \times 256}
+\rightarrow
+\mathbb{R}^{3 \times 256 \times 256}.
+\]
+
+
+
+\subsection{ResNet18 Architecture}
+\label{sec:resnet18_architecture}
+
+The main backbone configuration uses torchvision ResNet18 \cite{he2016residual}. The ResNet18 classification layer is replaced with \texttt{nn.Identity()}, so the network outputs a feature vector rather than class logits. For a selected slice, the feature path is
+\[
+z_{i,j}^{(\mathrm{ResNet})}
+=
+\Phi_{\psi}^{(\mathrm{ResNet18})}(r_{i,j}),
+\qquad
+z_{i,j}^{(\mathrm{ResNet})}
+\in
+\mathbb{R}^{512}.
+\]
+In the main three-channel configuration, \(C=3\), so the pretrained ResNet18 input stem is kept unchanged. In the two-window configuration, a trainable \(1 \times 1\) convolution maps the two channels to the expected three-channel input.
+
+The slice-level regression head is a small multilayer head applied after layer normalization:
+\[
+s_{i,j}^{(\mathrm{ResNet})}
+=
+g_{\omega}^{(\mathrm{ResNet18})}
+\!\left(z_{i,j}^{(\mathrm{ResNet})}\right),
+\qquad
+g_{\omega}^{(\mathrm{ResNet18})}:
+\mathbb{R}^{512}
+\rightarrow
+\mathbb{R}.
+\]
+The head consists of a linear layer to 128 units, ReLU activation, dropout, and a final linear layer to one scalar output. The main ResNet18 configuration uses torchvision's default pretrained weights when no RadImageNet checkpoint path is supplied.
+
+
+\subsection{DenseNet121 Architecture}
+\label{sec:densenet121_architecture}
+
+DenseNet121 is implemented as a comparison backbone using torchvision DenseNet121 \cite{huang2017densenet}. Its classification layer is replaced by an identity mapping. For a selected slice,
+\[
+z_{i,j}^{(\mathrm{DenseNet})}
+=
+\Phi_{\psi}^{(\mathrm{DenseNet121})}(r_{i,j}),
+\qquad
+z_{i,j}^{(\mathrm{DenseNet})}
+\in
+\mathbb{R}^{1024}.
+\]
+As with ResNet18, the input representation is first mapped to three channels if needed. The DenseNet121 slice-level score is produced by the same type of normalized MLP regression head:
+\[
+s_{i,j}^{(\mathrm{DenseNet})}
+=
+g_{\omega}^{(\mathrm{DenseNet121})}
+\!\left(z_{i,j}^{(\mathrm{DenseNet})}\right),
+\qquad
+g_{\omega}^{(\mathrm{DenseNet121})}:
+\mathbb{R}^{1024}
+\rightarrow
+\mathbb{R}.
+\]
+The implementation supports ImageNet initialization through torchvision and external RadImageNet weights. In the reported comparison, DenseNet121 uses a RadImageNet checkpoint path, whereas ResNet18 uses ImageNet initialization.
+
+
+\subsection{Handcrafted Feature Extraction}
+\label{sec:handcrafted_feature_extraction}
+
+Some experiments supplement the learned CNN feature vector with a handcrafted feature vector. This branch is separate from the slice-selection descriptors \(d_{i,j}\) and \(p_{i,j}\) used earlier; those descriptors choose representative slices, while the handcrafted features here are passed to the regression model.
+
+For a selected slice, the handcrafted feature vector is written as
+\[
+b_{i,j}
+=
+B_{\mathrm{BoVW}}(\tilde{x}_{i,j}),
+\qquad
+b_{i,j}
+\in
+\mathbb{R}^{K_{\mathrm{vw}}},
+\]
+where \(B_{\mathrm{BoVW}}(\cdot)\) denotes the ORB-based bag-of-visual-words extraction procedure and \(K_{\mathrm{vw}}\) is the visual vocabulary size. In the implemented fusion configuration,
+\[
+K_{\mathrm{vw}} = 64.
+\]
+The handcrafted branch is a fixed feature-extraction step followed by a trainable projection inside the model.
+
+
+\subsection{ORB and Bag-of-Visual-Words}
+\label{sec:orb_bovw}
+
+The handcrafted branch uses ORB descriptors computed with OpenCV's ORB implementation \cite{rublee2011orb}. In the main fusion configuration, the keypoint image is the mediastinal-window image, with \texttt{KEYPOINT\_SOURCE}=\texttt{medi}, and keypoint detection is restricted by the mediastinal mask used by the dataset helper.
+
+Let
+\[
+\mathcal{D}_{i,j}
+=
+\{\delta_{i,j,1},\dots,\delta_{i,j,m_{i,j}}\}
+\]
+denote the variable-length set of ORB descriptors extracted for slice \(j\) from patient \(i\). The visual vocabulary is fitted on training-fold descriptors only, using MiniBatchKMeans, so that validation slices are encoded using a vocabulary not fitted on their descriptors. The vocabulary is written as
+\[
+\mathcal{V}
+=
+\{c_1,\dots,c_{K_{\mathrm{vw}}}\},
+\qquad
+K_{\mathrm{vw}}=64.
+\]
+The vocabulary configuration uses at most 50,000 descriptors for fitting, 500 ORB features per slice, MiniBatchKMeans batch size 4096, maximum 200 iterations, and a fold-dependent random seed.
+
+Each slice descriptor set is converted into a normalized visual-word histogram. For visual word \(k\), the histogram entry can be written as
+\[
+b_{i,j,k}
+=
+\frac{1}{m_{i,j}}
+\sum_{\ell=1}^{m_{i,j}}
+\mathbf{1}
+\!\left[
+k
+=
+\arg\min_{1 \leq q \leq K_{\mathrm{vw}}}
+\|\delta_{i,j,\ell}-c_q\|_2
+\right],
+\]
+when at least one descriptor is available. The resulting vector is
+\[
+b_{i,j}
+=
+\left[
+b_{i,j,1},\dots,b_{i,j,K_{\mathrm{vw}}}
+\right]
+\in
+\mathbb{R}^{K_{\mathrm{vw}}}.
+\]
+This follows the standard bag-of-visual-words idea of representing variable-length local descriptors by a fixed-length visual-word histogram, which has also been used in CT image retrieval settings \cite{yang2012bovwct}. If ORB finds no descriptors for a slice, the implementation returns the zero vector in \(\mathbb{R}^{K_{\mathrm{vw}}}\).
+
+
+\subsection{Feature Fusion Strategy}
+\label{sec:feature_fusion_strategy}
+
+Feature fusion is performed at slice level before patient-level aggregation. When handcrafted fusion is disabled, the regression head operates directly on the CNN feature vector:
+\[
+s_{i,j}
+=
+g_{\omega}(z_{i,j}).
+\]
+When ORB-BoVW fusion is enabled, the BoVW histogram is first passed through a trainable projection branch consisting of layer normalization, a linear projection to 64 dimensions, and ReLU activation:
+\[
+\bar{b}_{i,j}
+=
+q_{\eta}(b_{i,j}),
+\qquad
+\bar{b}_{i,j}
+\in
+\mathbb{R}^{64},
+\]
+where \(\eta\) denotes the trainable parameters of the handcrafted projection branch. The projected handcrafted vector is then concatenated with the normalized CNN feature vector:
+\[
+v_{i,j}
+=
+\left[
+z_{i,j};
+\bar{b}_{i,j}
+\right]
+\in
+\mathbb{R}^{d_z+64},
+\]
+where \(d_z=512\) for ResNet18 and \(d_z=1024\) for DenseNet121. The slice-level score is then computed as
+\[
+s_{i,j}
+=
+g_{\omega}(v_{i,j}).
+\]
+The fused regression head has the same output structure as the CNN-only head, a linear layer to 128 units, ReLU activation, dropout, and a final scalar output. Missing cached BoVW features are replaced by zero vectors. The fusion output remains a slice-level score and is aggregated later in Section~\ref{sec:patient_level_prediction_aggregation}.
+
+
+
+\section{Patient-Level Prediction Aggregation}
+\label{sec:patient_level_prediction_aggregation}
+
+The regression head produces one scalar score for each selected slice, whereas \(y_i\) is patient-level. The pipeline therefore aggregates slice-level scores into one patient-level prediction:
+\[
+\hat{y}_i
+=
+A\left(\{s_{i,j}: j \in \mathcal{S}_i\}\right),
+\]
+where \(A(\cdot)\) denotes the selected patient-level aggregation rule. The implementation supports mean aggregation, top-\(k\) aggregation, and a hybrid aggregation rule that combines the two.
+
+
+\subsection{Slice-Level Predictions}
+\label{sec:slice_level_predictions}
+
+For each selected slice \(j \in \mathcal{S}_i\), the model computes a slice-level score from the learned feature vector:
+\[
+s_{i,j}
+=
+g_{\omega}(z_{i,j}).
+\]
+When handcrafted feature fusion is enabled, the same prediction head is applied to the fused feature vector:
+\[
+s_{i,j}
+=
+g_{\omega}(v_{i,j}).
+\]
+For patient \(i\), the scores available for aggregation are collected as
+\[
+\mathbf{s}_i
+=
+\{s_{i,j}: j \in \mathcal{S}_i\},
+\qquad
+M_i = |\mathcal{S}_i|.
+\]
+The slice-level scores are intermediate outputs, not independently validated slice-level targets. If an experiment is trained on a transformed target, aggregation is applied in the corresponding model-output scale. The implementation includes an empty-list fallback, but slice selection is designed to provide a non-empty selected set for each case.
+
+
+\subsection{Mean Aggregation}
+\label{sec:mean_aggregation}
+
+Mean aggregation averages all selected slice-level scores:
+\[
+\hat{y}_i^{(\mathrm{mean})}
+=
+\frac{1}{M_i}
+\sum_{j \in \mathcal{S}_i}
+s_{i,j},
+\qquad
+M_i = |\mathcal{S}_i|.
+\]
+This mode uses every selected slice score with equal weight and has no additional hyperparameter.
+
+
+\subsection[Top-k Aggregation]{Top-\(k\) Aggregation}
+\label{sec:topk_aggregation}
+
+Top-\(k\) aggregation uses the largest predicted slice scores for a patient. The implementation supports either a fixed integer \(k\) or a fraction of the selected slices. When fixed \(k\) is supplied, it takes priority. The effective count is capped by the available slice predictions:
+\[
+k_i^{(\mathrm{eff})}
+=
+\min(k, M_i).
+\]
+Let \(\mathcal{T}_{i,k} \subseteq \mathcal{S}_i\) denote the indices of the \(k_i^{(\mathrm{eff})}\) largest slice scores for patient \(i\):
+\[
+\mathcal{T}_{i,k}
+=
+\operatorname{TopK}_{k_i^{(\mathrm{eff})}}
+\left(\{s_{i,j}: j \in \mathcal{S}_i\}\right).
+\]
+The patient-level prediction under top-\(k\) aggregation is then
+\[
+\hat{y}_i^{(\mathrm{top}k)}
+=
+\frac{1}{k_i^{(\mathrm{eff})}}
+\sum_{j \in \mathcal{T}_{i,k}}
+s_{i,j}.
+\]
+In the main aggregation configuration, the fixed setting is \(k=20\). The implementation also keeps a fractional top-\(k\) option. If a fractional setting is used instead, the effective count is computed from \(M_i\) and constrained to be at least one.
+
+
+\subsection{Hybrid Aggregation Strategy}
+\label{sec:hybrid_aggregation_strategy}
+
+The hybrid aggregation mode, named \texttt{mix} in the implementation, combines the top-\(k\) and mean estimates:
+\[
+\hat{y}_i^{(\mathrm{hybrid})}
+=
+\lambda
+\hat{y}_i^{(\mathrm{top}k)}
++
+(1-\lambda)
+\hat{y}_i^{(\mathrm{mean})}.
+\]
+The mixing weight \(\lambda\) is a fixed aggregation setting, not a learned model parameter. In the main configuration,
+\[
+\lambda = 0.7,
+\qquad
+k = 20.
+\]
+Thus, the hybrid rule gives greater weight to the top-\(k\) component while retaining a contribution from all selected slices. The configured fractional value \(\texttt{TOPK\_FRAC}=0.15\) is present, but it is not used when fixed \(\texttt{TOPK\_K}=20\) is supplied.
+
+
+\section{Training, Transfer Learning, and Model Selection}
+\label{sec:training_transfer_model_selection}
+
+This section describes the training objective, optimization settings, fold protocol, transfer-learning setup, and model-selection rule. Quantitative validation results are reported in Chapter~5.
+
+\subsection{Learning Objective}
+\label{sec:learning_objective}
+
+The final prediction target is defined at patient level, but the implemented training loop optimizes sampled slice predictions using the corresponding patient label as a weak training signal. In this section, \(y_i\) denotes the selected target variable for patient \(i\). For the main internal training runs this target is the log-transformed label field \texttt{label\_log10}, the same training code can also be applied to another selected target column.
+
+For a mini-batch of sampled slices \(\mathcal{B}_{\mathrm{slice}}\), where each element is a patient--slice pair \((i,j)\), the model computes a slice-level score \(s_{i,j}\). The implemented loss is mean squared error:
+\begin{equation}
+\mathcal{L}_{\mathrm{MSE}}
+=
+\frac{1}{|\mathcal{B}_{\mathrm{slice}}|}
+\sum_{(i,j)\in\mathcal{B}_{\mathrm{slice}}}
+\left(y_i - s_{i,j}\right)^2 .
+\label{eq:method_mse_slice_training}
+\end{equation}
+The label used in the loss is patient-level, but optimization is carried out over sampled slice predictions. Patient-level predictions
+\[
+\hat{y}_i =
+A\left(\{s_{i,j}:j\in\mathcal{S}_i\}\right)
+\]
+are computed during validation and model selection using the aggregation rules described in Section~\ref{sec:patient_level_prediction_aggregation}.
+
+
+\subsection{Optimization Settings}
+\label{sec:optimization_settings}
+The trainable parameters depend on whether the handcrafted branch is enabled. Without fusion the optimized parameter set consists of the CNN feature extractor and prediction head
+\[
+\Theta=\{\psi,\omega\}.
+\]
+When ORB/BoVW fusion is enabled the handcrafted projection branch is also trained
+\[
+\Theta=\{\psi,\eta,\omega\}.
+\]
+Here \(\eta\) denotes the handcrafted-feature projection branch. Aggregation settings such as \(k\) and \(\lambda\) are fixed, not trainable.
+
+The main internal training configuration uses AdamW optimization, mean squared error loss, and early stopping based on validation performance. The values below are taken from the implemented high-pass and ORB/BoVW main training configuration.
+
+\begin{table}[htbp]
+\centering
+\caption{Main training settings used in the implemented internal cross-validation runs.}
+\label{tab:method_training_settings}
+\begin{tabular}{p{0.27\textwidth}p{0.22\textwidth}p{0.41\textwidth}}
+\toprule
+Setting & Value & Note \\
+\midrule
+Optimizer & AdamW & Applied to parameters with \texttt{requires\_grad=True} \\
+Initial learning rate & \(1\times10^{-4}\) & Used before partial unfreezing \\
+Learning rate after unfreezing & \(3\times10^{-5}\) & Implemented as \(0.3\) times the initial rate \\
+Weight decay & \(2\times10^{-4}\) & AdamW weight decay \\
+Batch size & \(32\) & Slice-level mini-batches \\
+Maximum epochs & \(30\) & Per fold \\
+Early-stopping patience & \(6\) epochs & Based on validation RMSE in log space \\
+Dropout & \(0.3\) & Applied in the prediction head configuration \\
+Gradient clipping & \(1.0\) & Norm clipping when enabled \\
+Data augmentation & Enabled & Rotation up to \(5^\circ\), translation up to \(6\) pixels, intensity jitter \(0.03\), and noise \(0.02\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The main training loop does not use a separate learning-rate scheduler. Instead, the optimizer is recreated with a lower learning rate when later backbone layers are unfrozen.
+
+\subsection{Cross-Validation Protocol}
+\label{sec:cross_validation_protocol}
+Model development is organized as five-fold cross-validation using fold assignments stored in the locked split file. For fold \(f\), the validation set contains patients assigned to that fold, while the training set contains the remaining patients:
+\begin{equation}
+\mathcal{I}
+=
+\mathcal{I}_{\mathrm{train}}^{(f)}
+\cup
+\mathcal{I}_{\mathrm{val}}^{(f)},
+\qquad
+\mathcal{I}_{\mathrm{train}}^{(f)}
+\cap
+\mathcal{I}_{\mathrm{val}}^{(f)}
+=
+\emptyset .
+\label{eq:method_cv_split}
+\end{equation}
+The split is patient-level, so slices from the same patient are not divided between training and validation.
+
+For feature-fusion experiments, the BoVW vocabulary is fitted only on the training part of each fold. Validation slices are encoded using the corresponding training vocabulary, keeping the handcrafted branch within the cross-validation boundary.
+
+
+\subsection{Transfer Learning Setup}
+\label{sec:method_transfer_learning_setup}
+Transfer learning appears in two forms: pretrained image-model initialization for internal cross-validation, and staged fine-tuning from a source-domain checkpoint for the external source--target transfer workflow.
+
+
+\subsubsection{Pretraining Sources}
+\label{sec:pretraining_sources}
+For the main ResNet18 configuration, the backbone is initialized with ImageNet weights from \texttt{torchvision}. The DenseNet121 comparison configuration supports initialization from a local RadImageNet checkpoint, a radiology-domain pretraining resource \cite{mei2022radimagenet}. ResNet18 and DenseNet121 are the relevant backbones for this methodology chapter.
+
+In the external transfer workflow, the source initialization is a checkpoint trained on the corresponding source dataset. Mucus-to-MosMed transfer starts from an internal mucus-score checkpoint, while MosMed-to-mucus transfer starts from a MosMed severity checkpoint. This is separate from ImageNet or RadImageNet initialization because it transfers from a task-specific CT model.
+
+
+\subsubsection{Model Initialization}
+\label{sec:model_initialization}
+Pretrained weights initialize the backbone feature extractor:
+\begin{equation}
+\psi_0 \leftarrow \psi_{\mathrm{pre}} .
+\label{eq:method_pretrained_backbone_init}
+\end{equation}
+The original classification layer is replaced by a newly initialized regression head:
+\begin{equation}
+\omega_0 \sim \mathrm{Init}(\cdot).
+\label{eq:method_head_init}
+\end{equation}
+When feature fusion is enabled the handcrafted projection branch is also initialized newly:
+\begin{equation}
+\eta_0 \sim \mathrm{Init}(\cdot).
+\label{eq:method_fusion_init}
+\end{equation}
+
+For three-channel inputs, the represented slice matches the pretrained backbone input format. For two-channel inputs, a newly initialized projection layer maps the representation to three channels and is trained with the non-frozen model components.
+
+
+\subsubsection{Fine-Tuning Strategy}
+\label{sec:fine_tuning_strategy}
+Internal cross-validation uses staged fine-tuning. Training begins with the pretrained backbone frozen, so only newly added parts such as the regression head, input projection layer, and handcrafted projection branch are optimized. After the frozen phase, the final backbone stage is unfrozen and optimized with a smaller learning rate.
+
+In the main configuration, the frozen phase lasts for \(2\) epochs. After that, ResNet18 unfreezes \texttt{layer4}, while DenseNet121 unfreezes \texttt{features.denseblock4} and \texttt{features.norm5}. The optimizer is recreated with learning rate \(3\times10^{-5}\), so adaptation is limited to later backbone layers.
+
+The external transfer workflow follows the same idea, it starts from the source-domain checkpoint, trains the head-only configuration on the target dataset, then unfreezes \texttt{layer4}, with optional \texttt{layer3} unfreezing for a final low-learning-rate stage.
+
+
+\subsubsection{External Source--Target Transfer}
+\label{sec:external_source_target_transfer}
+The external transfer experiments use a source-domain checkpoint trained on the corresponding source dataset and evaluate reuse on a different target dataset. Mucus-to-MosMed transfer uses an internal mucus-score checkpoint and adapts it to MosMed. MosMed-to-mucus transfer uses a MosMed severity checkpoint and adapts it to the internal mucus-score task. The purpose is cross-domain reuse of CT-based representations, not external validation for mucus-burden prediction.
+
+For each direction, zero-shot evaluation applies the source-domain checkpoint to the target domain without updating model parameters. Fine-tuning uses the same checkpoint as initialization and trains further on target-domain training data before validation.
+
+Because the MosMed and mucus tasks use different targets and output scales, MosMed-to-mucus transfer applies a fixed scale mapping when MosMed-scale predictions are compared with mucus-score targets:
+\[
+\hat{y}_{i}^{(\mathrm{raw})}
+=
+2\,\hat{y}_{i}^{(\mathrm{M})}.
+\]
+This is a fixed implementation choice and should not be interpreted as a learned calibration between the two clinical targets.
+
+When MosMed-to-mucus fine-tuning is performed against the log-transformed mucus target, the scaled raw prediction is clipped and transformed before computing the loss:
+\[
+\hat{y}_{i}^{(\log)}
+=
+\log_{10}
+\left(
+\operatorname{clip}
+\left(
+2\,\hat{y}_{i}^{(\mathrm{M})},
+10^{-6},
+8.0
+\right)
+\right).
+\]
+The model is then optimized against the stored mucus \texttt{label\_log10} target. For reporting on the mucus task, predictions are evaluated on the raw mucus-score scale when raw-scale metrics are shown.
+
+Transfer results are computed at case level after slice-level predictions have been aggregated. Chapter~5 reports the mean metric value across folds for each transfer setting.
+
+
+\subsection{Model Selection Criteria}
+\label{sec:model_selection_criteria}
+Model selection is performed separately for each fold using patient-level validation predictions. After each epoch \(t\), validation slice scores are aggregated into one prediction \(\hat{y}_i^{(t)}\) for each validation patient \(i \in \mathcal{I}_{\mathrm{val}}^{(f)}\). The checkpoint is selected using validation RMSE in the same target space used for training. For the main internal experiments, this is the log-transformed target space,
+\[
+\mathrm{RMSE}_{\mathrm{val}}^{(f)}(t)
+=
+\sqrt{
+\frac{1}{|\mathcal{I}_{\mathrm{val}}^{(f)}|}
+\sum_{i\in\mathcal{I}_{\mathrm{val}}^{(f)}}
+\left(y_i-\hat{y}_i^{(t)}\right)^2
+}.
+\]
+Here, \(y_i\) denotes the selected training target for the experiment, such as the log-transformed mucus target in the main internal runs. The selected epoch for fold \(f\) is therefore
+\[
+t_f^{*}
+=
+\arg\min_t
+\mathrm{RMSE}_{\mathrm{val}}^{(f)}(t).
+\]
+The best model state for each fold is stored during training and restored after early stopping. MAE, \(R^2\), and Spearman correlation are also computed for reporting, but they are not the primary checkpoint-selection criterion.
+
+For experiments trained on the log-transformed target, model selection is done in log space, while the final reported MAE and RMSE can be computed after transforming predictions back to the raw mucus-score scale. This keeps checkpoint selection consistent with the training objective, while keeping the reported results easier to interpret.
+
+
+\section{Implementation and Reproducibility}
+\label{sec:implementation_reproducibility}
+This section records the practical setup used to run the experiments. The purpose is not to repeat the full pipeline, but to document the software stack, main hyperparameters, randomness controls, and computational setup needed to reproduce the methodology as closely as possible.
+
+
+\subsection{Software and Libraries}
+\label{sec:software_libraries}
+The experiments were implemented in Python notebooks using Google Colab Pro and Google Drive. The software documentation versions are listed in Table~\ref{tab:software_libraries}. 
+
+\begin{table}[H]
+\centering
+\small
+\caption{Main software libraries used in the implementation.}
+\label{tab:software_libraries}
+\begin{tabular}{p{0.25\textwidth}p{0.20\textwidth}p{0.45\textwidth}}
+\toprule
+Library or tool & Documented version & Role in the implementation \\
+\midrule
+Python & 3.12.13 & Notebook execution and experiment orchestration. \\
+PyTorch & 2.10.0 & Tensor operations, CNN model definition, loss computation, optimization, and checkpoint handling. \\
+\texttt{torchvision} & 0.25.0 & Pretrained CNN backbones, including ResNet18 and DenseNet121. \\
+NumPy & 2.0.2 & Stored-volume loading, array operations, slice descriptors, and selected random generators. \\
+pandas & 2.2.2 & Dataset indexing, fold assignment, label fields, and tabular summaries. \\
+OpenCV & 4.13.0 & Slice resizing, CT channel construction, filtering, DCT transforms, mask operations, and ORB descriptors. \\
+scikit-learn & 1.6.1 & PCA, MiniBatchKMeans, nearest-centroid assignment, and BoVW vocabulary construction. \\
+SciPy & 1.16.3 & Correlation computation during validation reporting. \\
+Matplotlib & 3.10.0 & Quality-control plots and visual inspection figures. \\
+nibabel & 5.4.2 & Loading NIfTI volumes in the external MosMed transfer workflow. \\
+Google Colab Pro & -- & Notebook runtime environment and GPU access. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Hyperparameters}
+\label{sec:hyperparameters}
+Stage-specific settings are described in the relevant methodology sections. Tables~\ref{tab:main_pipeline_hyperparameters} and~\ref{tab:training_repro_hyperparameters} collect the main confirmed values for the \textbf{ResNet18-3CH+BoVW (Proposed model)} configuration.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Main data, slice-selection, and representation hyperparameters.}
+\label{tab:main_pipeline_hyperparameters}
+\begin{tabular}{p{0.24\textwidth}p{0.30\textwidth}p{0.36\textwidth}}
+\toprule
+Stage & Hyperparameter & Confirmed value \\
+\midrule
+Preprocessing & Canonical HU clipping & \([-1350, 600]\) HU \\
+Input representation & Final in-plane size & \(256 \times 256\) pixels \\
+Input representation & Lung window & \([-1350, 150]\) HU \\
+Input representation & Mediastinal window & \([-160, 240]\) HU \\
+Third channel & Main high-pass source & Mediastinal-window channel \\
+Third channel & High-pass Gaussian scale & \(\sigma_{\mathrm{HP}}=2.0\) \\
+Third channel & Robust response scaling & 1st--99th percentile normalization \\
+Third channel & Lung-mask suppression & Enabled in the main high-pass configuration \\
+Slice selection & Central fraction & \(0.75\) \\
+Slice selection & Selected slices per case & \(160\) \\
+Slice selection & Low-resolution descriptor size & \(64 \times 64\) \\
+Slice selection & PCA components & \(24\) \\
+Slice selection & Informative-slice cap & \(N_{\mathrm{informative}}=30\) \\
+Slice filtering & Main QC thresholds & \(\tau_{\mathrm{lung}}=0.06\), \(\tau_{\mathrm{air}}=0.98\), \(\tau_{\mathrm{body}}=0.45\), high-density threshold \(-200\) HU \\
+Aggregation & Main aggregation mode & Hybrid \texttt{mix} aggregation \\
+Aggregation & Top-\(k\) setting & \(k=20\), with fractional fallback \(0.15\) \\
+Aggregation & Hybrid mixing weight & \(\lambda=0.7\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Main model, fusion, and training hyperparameters.}
+\label{tab:training_repro_hyperparameters}
+\begin{tabular}{p{0.24\textwidth}p{0.30\textwidth}p{0.36\textwidth}}
+\toprule
+Stage & Hyperparameter & Confirmed value \\
+\midrule
+Backbone & Main backbone & ResNet18 \\
+Backbone & Input channels & \(C=3\) for the main high-pass configuration \\
+Feature fusion & ORB/BoVW branch & Enabled in the main configuration \\
+Feature fusion & Visual vocabulary size & \(K_{\mathrm{vw}}=64\) \\
+Feature fusion & ORB keypoint limit & \(500\) keypoints per slice \\
+Feature fusion & Descriptor cap for vocabulary fitting & \(50{,}000\) descriptors \\
+Feature fusion & Keypoint source & Mediastinal-window channel, restricted by the approximate lung mask \\
+BoVW clustering & MiniBatchKMeans settings & Batch size \(4096\), \(200\) maximum iterations, \texttt{n\_init=auto} \\
+Training & Optimizer & AdamW \\
+Training & Batch size & \(32\) \\
+Training & Maximum epochs & \(30\) \\
+Training & Early-stopping patience & \(6\) epochs \\
+Training & Initial learning rate & \(1\times10^{-4}\) \\
+Training & Learning rate after partial unfreezing & \(3\times10^{-5}\) \\
+Training & Weight decay & \(2\times10^{-4}\) \\
+Training & Dropout & \(0.3\) \\
+Training & Frozen-backbone phase & \(2\) epochs \\
+Training & Gradient clipping & \(1.0\) \\
+Data loading & Worker processes & \texttt{num\_workers=0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Comparison representations such as DoG, LoG, and DCT use the same input-representation interface but are not repeated here because they are not the main final configuration.
+
+
+\subsection{Reproducibility and Randomness Control}
+\label{sec:reproducibility_randomness_control}
+The implementation uses fixed seeds for selected preprocessing and fold-level operations, including \texttt{RANDOM\_STATE=42} for slice selection, \texttt{SEED=42} in the main training configuration, and fold-specific MiniBatchKMeans seeds defined as \texttt{seed + 1000 + fold}. Fold assignments are stored in a locked split file and reused directly. Within each fold, BoVW vocabularies are fitted only on the training split, with validation slices encoded using the corresponding training vocabulary, preventing validation leakage into the handcrafted features.
+
+The setup is therefore partially controlled but not bitwise deterministic. The notebooks do not define a single global seeding routine for Python \texttt{random}, NumPy, PyTorch, CUDA, and cuDNN, and no explicit cuDNN deterministic settings were confirmed. Training augmentations also include random geometric and intensity transformations. Part of the representative dataset seed construction depends on Python's \texttt{hash} function, which can vary across processes unless \texttt{PYTHONHASHSEED} is fixed. Thus, the split structure and main configuration values are reproducible, while exact slice order and training trajectories may still vary across sessions or hardware backends.
+
+
+\subsection{Hardware and Computational Resources}
+\label{sec:hardware_computational_resources}
+Experiments were run in Google Colab Pro, with notebooks configured to use CUDA when available. GPU runtimes were allocated dynamically and could vary between sessions; available options during the project included NVIDIA H100, A100, and G4-based runtimes \cite{nvidia2024h100,nvidia2024a100,googlecloud2025g4gpu}. The documented environment snapshot was CPU-only, reporting \texttt{CUDA available=False} and \texttt{torch.version.cuda=None}, and should therefore be interpreted as package-version documentation rather than a complete record of all GPU hardware used during training.

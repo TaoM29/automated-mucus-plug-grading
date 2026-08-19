@@ -1,0 +1,64 @@
+# Medical / clinical data (deny by default)
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+*.npy
+*.npz
+*.h5
+*.hdf5
+data/*
+!data/README.md
+!data/example_manifest.csv
+
+# Model weights and experiment artefacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+checkpoints/
+weights/
+outputs/
+runs/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Operating systems and IDEs
+.DS_Store
+.vscode/
+.idea/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.swp
+*.bak
+
+# LaTeX build products
+*.aux
+*.bcf
+*.blg
+*.bbl
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc

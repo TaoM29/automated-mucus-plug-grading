@@ -1,0 +1,4 @@
+patient_id,volume_path,label,fold
+EXAMPLE_001,/path/to/authorised/data/volumes_hu/EXAMPLE_001.npy,0.0,0
+EXAMPLE_002,/path/to/authorised/data/volumes_hu/EXAMPLE_002.npy,2.0,1
+EXAMPLE_003,/path/to/authorised/data/volumes_hu/EXAMPLE_003.npy,5.0,2
