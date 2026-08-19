@@ -37,9 +37,7 @@ notebooks/main/      Main thesis experiments
 notebooks/archive/   Earlier and alternative thesis experiments
 configs/             Configuration guidance; no real paths or credentials
 data/                Synthetic manifest schema and access guidance only
-results/             Publication-safe aggregate results only
 docs/                Methodology, data access, and reproducibility notes
-thesis/              LaTeX thesis source and bibliography
 ```
 
 ## Notebook guide
@@ -80,9 +78,6 @@ python -m pip install -r requirements.txt
 
 Then configure paths to authorised data in the configuration cell near the beginning of the relevant notebook. Exact package versions, hardware details, and fully deterministic CUDA execution were not preserved in the original thesis snapshot; see [docs/reproducibility.md](docs/reproducibility.md).
 
-## Thesis
-
-The LaTeX source and bibliography are provided in `thesis/`. The final PDF is intentionally not bundled here; add the official publication URL when available.
 
 ## Citation
 
