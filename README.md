@@ -14,19 +14,13 @@ The task is patient-level regression from chest CT examinations where only one m
 
 ## Methodology
 
-```text
-Chest CT
-  -> HU preprocessing
-  -> representative slice selection
-  -> lung and mediastinal CT windows
-  -> high-frequency third channel
-  -> ResNet18 feature extraction
-  -> ORB-BoVW features
-  -> CNN and handcrafted feature fusion
-  -> weak slice-level predictions
-  -> patient-level aggregation
-  -> mucus plugging score
-```
+<p align="center">
+  <img src="figures/final_pipeline.svg" alt="Final mucus plug grading pipeline" width="760">
+</p>
+
+<p align="center">
+  <em>Overview of the proposed weakly supervised pipeline for patient-level mucus plug grading from chest CT.</em>
+</p>
 
 The final internal configuration uses representative sampling, a three-channel high-pass CT representation, ResNet18, ORB bag-of-visual-words features, feature fusion, and patient-level aggregation. Five-fold patient-level cross-validation was used for internal evaluation. MosMed experiments study transfer and domain shift only; they are not external validation for mucus-burden prediction.
 
