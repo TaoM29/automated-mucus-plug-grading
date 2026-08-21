@@ -48,15 +48,21 @@ Archived notebooks preserve legitimate development history and alternative exper
 
 ## Main results
 
-The aggregate five-fold internal results below are reproduced from the submitted thesis. Metrics are reported as mean +/- standard deviation across patient-level validation folds; error metrics are on the raw mucus-score scale.
+Performance was evaluated at the **patient level** using five-fold cross-validation. The experiments show progressive improvements from representative slice selection, richer CT representations, and feature fusion.
 
-| Experiment | MAE | RMSE | R2 | Spearman |
+| Experiment | MAE ↓ | RMSE ↓ | R² ↑ | Spearman ρ ↑ |
 | --- | ---: | ---: | ---: | ---: |
-| ResNet18, two-window input | 1.451 +/- 0.395 | 1.858 +/- 0.434 | 0.126 +/- 0.161 | 0.363 +/- 0.239 |
-| ResNet18, three-channel input | 1.386 +/- 0.456 | 1.826 +/- 0.394 | 0.186 +/- 0.394 | 0.387 +/- 0.256 |
-| ResNet18-3CH+BoVW | **1.244 +/- 0.297** | **1.712 +/- 0.505** | **0.236 +/- 0.295** | **0.498 +/- 0.346** |
+| Uniform slice sampling | 1.922 | 2.268 | -0.009 | 0.202 |
+| Representative slice sampling | 1.760 | 2.223 | 0.003 | 0.306 |
+| ResNet18, two-window input | 1.451 ± 0.395 | 1.858 ± 0.434 | 0.126 ± 0.161 | 0.363 ± 0.239 |
+| ResNet18, three-channel input | 1.386 ± 0.456 | 1.826 ± 0.394 | 0.186 ± 0.394 | 0.387 ± 0.256 |
+| **ResNet18-3CH + ORB-BoVW** | **1.244 ± 0.297** | **1.712 ± 0.505** | **0.236 ± 0.295** | **0.498 ± 0.346** |
 
-These findings are exploratory and limited by the small internal cohort, weak supervision, and lack of external validation with a comparable mucus-burden target.
+The final **ResNet18-3CH + ORB-BoVW** model achieved the strongest internal performance. Combining learned CNN representations with handcrafted ORB-BoVW features reduced MAE by approximately **14%** compared with the two-window ResNet18 configuration.
+
+The thesis also investigated transfer learning between the mucus-plug dataset and the public MosMed CT dataset. These experiments explored **transfer learning and domain shift** and should not be interpreted as external validation of mucus-plug grading.
+
+> **Note:** Results are exploratory due to the small internal cohort (32 patients), weak patient-level supervision, and lack of an independent external dataset with a comparable mucus-plug target.
 
 ## Dataset availability
 
