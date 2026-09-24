@@ -89,4 +89,5 @@ The author thanks the thesis supervisor and collaborators who supported the rese
 
 ## License
 
-No licence has yet been selected. See [LICENSE_PLACEHOLDER.md](LICENSE_PLACEHOLDER.md).
+The original code and accompanying software documentation are licensed under the [MIT License](LICENSE).
+The thesis PDF, clinical data, pretrained weights, and third-party material are not covered by this licence; their respective rights and terms apply.

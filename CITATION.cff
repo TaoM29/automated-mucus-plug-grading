@@ -2,8 +2,18 @@ cff-version: 1.2.0
 message: "If you use this code, please cite the associated master's thesis."
 title: "Automated Grading of Mucus Plugs in Lung CT Scans"
 type: software
+license: MIT
 authors:
   - family-names: Muhriz
     given-names: Taofik
-year: 2026
-license: "LicenseRef-Pending"
+repository-code: "https://github.com/TaoM29/automated-mucus-plug-grading"
+preferred-citation:
+  type: thesis
+  title: "Automated Prediction of Mucus Plug Burden in Lung CT Scans"
+  authors:
+    - family-names: Muhriz
+      given-names: Taofik
+  year: 2026
+  institution:
+    name: Norwegian University of Life Sciences (NMBU)
+  url: "https://github.com/TaoM29/automated-mucus-plug-grading/blob/main/Master_Thesis_2026.pdf"
