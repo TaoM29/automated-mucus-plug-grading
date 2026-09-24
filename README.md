@@ -86,8 +86,3 @@ Please cite the associated thesis. Citation metadata is available in [CITATION.c
 ## Acknowledgements
 
 The author thanks the thesis supervisor and collaborators who supported the research. Clinical data are not made available through this repository.
-
-## License
-
-The original code and accompanying software documentation are licensed under the [MIT License](LICENSE).
-The thesis PDF, clinical data, pretrained weights, and third-party material are not covered by this licence; their respective rights and terms apply.
