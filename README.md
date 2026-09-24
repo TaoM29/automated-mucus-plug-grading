@@ -82,7 +82,3 @@ Then configure paths to authorised data in the configuration cell near the begin
 ## Citation
 
 Please cite the associated thesis. Citation metadata is available in [CITATION.cff](CITATION.cff).
-
-## Acknowledgements
-
-The author thanks the thesis supervisor and collaborators who supported the research. Clinical data are not made available through this repository.
